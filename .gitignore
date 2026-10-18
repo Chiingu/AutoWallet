@@ -1,0 +1,17 @@
+.env
+# Python
+__pycache__/
+*.pyc
+venv/
+*.db
+
+# Env files (never commit real secrets)
+.env
+!.env.example
+
+# Node
+node_modules/
+.next/
+
+# OS
+.DS_Store

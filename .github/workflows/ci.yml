@@ -1,0 +1,196 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches: 
+      - main
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.14 (same version as the Docker image)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          cp .env.example .env
+          pip install -r requirements.txt
+
+      - name: Run backend tests
+        working-directory: backend
+        run: pytest tests -q
+
+  simulator-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: bank-simulator/requirements*.txt
+
+      - name: Install dependencies
+        working-directory: bank-simulator
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run simulator tests
+        working-directory: bank-simulator
+        run: pytest -q
+
+  api-gateway-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v5
+
+      - name: Set up Node 22 (same version as the Docker image)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: api-gateway/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api-gateway
+        run: npm ci
+
+      - name: Run api-gateway tests
+        working-directory: api-gateway
+        run: npm test
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v5
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build the frontend (tsc + vite)
+        working-directory: frontend
+        run: npm run build --if-present
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm run test --if-present
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Build backend image (tagged, for the boot smoke)
+        run: docker build -t bk:smoke backend/
+
+      - name: Build bank simulator image (tagged, for the boot smoke)
+        run: docker build -t sim:smoke bank-simulator/
+
+      - name: Build api-gateway image (tagged, for the boot smoke)
+        run: docker build -t authz:smoke api-gateway/
+
+      - name: Build frontend image (tagged, for the boot smoke)
+        run: docker build -t fe:smoke frontend/
+
+      - name: Boot smoke — backend image
+        run: |
+          docker run -d --name smoke-bk \
+            -e DATABASE_URL=sqlite:///./flowpay.db \
+            -e SECRET_KEY=smoke-secret \
+            -e REDIS_URL=redis://localhost:6379/0 \
+            -e BANK_SIMULATOR_URL=http://localhost:8001 \
+            -e GOOGLE_CLIENT_ID=not-configured \
+            -e GOOGLE_CLIENT_SECRET=not-configured \
+            -e GOOGLE_REDIRECT_URI=http://localhost:8000/api/auth/oauth/google/callback \
+            -p 19000:8000 bk:smoke
+          ok=""
+          for i in 1 2 3 4 5 6 7 8; do
+            sleep 2
+            if curl -sf http://127.0.0.1:19000/health; then ok=1; break; fi
+          done
+          if [ -z "$ok" ]; then
+            echo "=== boot smoke FAILED (backend) — container logs: ==="
+            docker logs smoke-bk
+            docker rm -f smoke-bk
+            exit 1
+          fi
+          docker stop smoke-bk
+          docker rm smoke-bk
+
+      - name: Boot smoke — bank simulator image
+        run: |
+          docker run -d --name smoke-sim -p 19002:8001 sim:smoke
+          ok=""
+          for i in 1 2 3 4 5 6 7 8; do
+            sleep 2
+            if timeout 2 bash -c '</dev/tcp/127.0.0.1/19002' 2>/dev/null; then ok=1; break; fi
+          done
+          if [ -z "$ok" ]; then
+            echo "=== boot smoke FAILED (bank simulator) — container logs: ==="
+            docker logs smoke-sim
+            docker rm -f smoke-sim
+            exit 1
+          fi
+          docker stop smoke-sim
+          docker rm smoke-sim
+
+      - name: Boot smoke — api-gateway image
+        run: |
+          docker run -d --name smoke-authz -e JWT_SECRET=smoke-secret -p 19001:3000 authz:smoke
+          ok=""
+          for i in 1 2 3 4 5 6 7 8; do
+            sleep 2
+            if curl -sf http://127.0.0.1:19001/api/health; then ok=1; break; fi
+          done
+          if [ -z "$ok" ]; then
+            echo "=== boot smoke FAILED (api-gateway) — container logs: ==="
+            docker logs smoke-authz
+            docker rm -f smoke-authz
+            exit 1
+          fi
+          docker stop smoke-authz
+          docker rm smoke-authz
+
+      - name: Boot smoke — frontend image (standalone nginx + bundle, no backend)
+        run: |
+          docker run -d --name smoke-fe -p 19080:80 fe:smoke
+          ok=""
+          for i in 1 2 3 4 5 6 7 8; do
+            sleep 2
+            if curl -sf http://127.0.0.1:19080/ | grep -qi "<title>"; then ok=1; break; fi
+          done
+          if [ -z "$ok" ]; then
+            echo "=== boot smoke FAILED (frontend) — container logs: ==="
+            docker logs smoke-fe
+            docker rm -f smoke-fe
+            exit 1
+          fi
+          docker stop smoke-fe
+          docker rm smoke-fe

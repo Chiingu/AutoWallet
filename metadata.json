@@ -1,0 +1,8 @@
+{
+  "name": "AutoWallet",
+  "description": "An automatic budgeting engine for freelancers that splits incoming payments across rent, tax, savings, and free-to-spend envelopes based on customizable priority rules.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
