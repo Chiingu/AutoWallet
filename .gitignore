@@ -12,6 +12,7 @@ venv/
 # Node
 node_modules/
 .next/
+.data/
 
 # OS
 .DS_Store

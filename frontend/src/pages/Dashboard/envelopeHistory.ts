@@ -37,5 +37,5 @@ export function buildEnvelopeHistory(
     return { status: 'unavailable', rows: [] }
   }
 
-  return { status: 'ready', rows: rows.filter((row) => row.added > 0).reverse() }
+  return { status: 'ready', rows: rows.filter((row) => Math.abs(row.added) > 0.001).reverse() }
 }

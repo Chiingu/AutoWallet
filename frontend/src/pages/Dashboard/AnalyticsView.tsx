@@ -130,6 +130,7 @@ function AnalyticsResults({ report: { summary, timeseries }, data, filters, onRe
   })
   const maxAllocation = Math.max(1, ...types.map(type => allocations[type] ?? 0))
   const balances = Object.fromEntries(data.wallets.map(wallet => [wallet.wallet_type, wallet.balance]))
+  const rentBalance = summary.balances.rent ?? balances.rent ?? 0
   const tax = summary.balances.tax ?? balances.tax ?? 0
   const savings = summary.balances.savings ?? balances.savings ?? 0
   const rent = data.rules.find(rule => rule.is_active && rule.target_wallet === 'rent' && rule.rule_type === 'lock_fixed')?.fixed_amount ?? 0
@@ -137,7 +138,25 @@ function AnalyticsResults({ report: { summary, timeseries }, data, filters, onRe
   const taxRate = data.rules.find(rule => rule.is_active && rule.target_wallet === 'tax' && rule.rule_type === 'percentage_remainder')?.percentage
   const expectedTax = taxRate === null || taxRate === undefined ? null : total * taxRate / 100
   const coverage = rent > 0 ? savings / rent : null
-  const processed = data.transactions.filter(item => item.status === 'processed')
+
+  // Compute deterministic Financial Health Score (0..100)
+  const activeRulesCount = data.rules.filter(r => r.is_active).length
+  const rentScore = rent > 0 ? Math.min(1, rentBalance / rent) * 30 : 25
+  const taxScore = expectedTax && expectedTax > 0 ? Math.min(1, tax / (expectedTax * 0.75)) * 30 : tax > 0 ? 25 : 15
+  const savingsScore = cap && cap > 0 ? Math.min(1, savings / cap) * 25 : Math.min(1, savings / Math.max(1, rent || 5000)) * 25
+  const rulesScore = (Math.min(4, activeRulesCount) / 4) * 15
+  const healthScore = Math.max(0, Math.min(100, Math.round(rentScore + taxScore + savingsScore + rulesScore)))
+  const healthStatus = healthScore >= 80 ? 'Strong reserve posture' : healthScore >= 55 ? 'Steady reserve progress' : 'Building reserves'
+  const healthColor = healthScore >= 80 ? '#1baf7a' : healthScore >= 55 ? '#5d67ba' : '#eb6834'
+  const arcLength = 282.74 // pi * 90
+
+  const processed = data.transactions.filter(
+    item =>
+      item.status === 'processed' &&
+      item.kind !== 'transfer' &&
+      item.kind !== 'spending' &&
+      !Object.values(item.allocations ?? {}).some(v => typeof v === 'number' && v < 0),
+  )
   const payments = processed.filter(item => item.created_at && item.created_at.slice(0, 10) >= filters.start && item.created_at.slice(0, 10) <= filters.end && (!filters.envelope || (item.allocations?.[filters.envelope] ?? 0) > 0))
   const detailed = processed.every(item => Boolean(item.created_at) && (!filters.envelope || item.allocations?.[filters.envelope] !== undefined)) && payments.length === summary.payments && Math.abs(payments.reduce((sum, item) => sum + item.amount, 0) - total) < 0.02
   const detailMissing = 'Dated payment details are needed for this chart. Your period totals and envelope charts are available above.'
@@ -157,7 +176,30 @@ function AnalyticsResults({ report: { summary, timeseries }, data, filters, onRe
 
   return <>
     {missing > 0.02 && <p className="workspace-note">{money.format(missing)} MAD of this income has no saved split. Allocation charts show only the allocations that were recorded.</p>}
-    <div className="analytics-overview"><section className="workspace-card analytics-health"><svg viewBox="0 0 220 130" role="img" aria-label="Health score unavailable"><path d="M20 110 A90 90 0 0 1 200 110" fill="none" stroke="#e7ecf2" strokeWidth="14" strokeLinecap="round" /><text x="110" y="100" textAnchor="middle" fill="#8693a6" fontSize="42">—</text></svg><h2>Not available right now</h2><p>A health score is not available yet. Your payment totals are shown alongside.</p><button className="workspace-text-button" onClick={onRefresh}><RefreshCw size={13} />Refresh data</button></section>
+    <div className="analytics-overview">
+      <section className="workspace-card analytics-health">
+        <svg viewBox="0 0 220 130" role="img" aria-label={`Financial health score ${healthScore} out of 100`}>
+          <path d="M20 110 A90 90 0 0 1 200 110" fill="none" stroke="#e7ecf2" strokeWidth="14" strokeLinecap="round" />
+          <path
+            d="M20 110 A90 90 0 0 1 200 110"
+            fill="none"
+            stroke={healthColor}
+            strokeWidth="14"
+            strokeLinecap="round"
+            strokeDasharray={arcLength}
+            strokeDashoffset={arcLength * (1 - healthScore / 100)}
+          />
+          <text x="110" y="96" textAnchor="middle" fill="currentColor" fontSize="38" fontWeight="800">
+            {healthScore}
+          </text>
+          <text x="110" y="116" textAnchor="middle" fill="#8693a6" fontSize="11" fontWeight="600">
+            OUT OF 100
+          </text>
+        </svg>
+        <h2>{healthStatus}</h2>
+        <p>Based on Rent lock coverage, Tax reserve readiness, Savings cap progress, and active rules.</p>
+        <button className="workspace-text-button" onClick={onRefresh}><RefreshCw size={13} />Refresh data</button>
+      </section>
       <div className="analytics-overview-right"><div className="analytics-stats"><section className="workspace-card"><h2>Income in period</h2><strong>{money.format(total)} <small>MAD</small></strong><p>{summary.payments} processed payments</p></section><section className="workspace-card"><h2>Average payment</h2><strong>{money.format(average)} <small>MAD</small></strong><p>Across the selected period</p></section><section className="workspace-card"><h2>Largest payment</h2><strong>{money.format(summary.largest_payment)} <small>MAD</small></strong><p>Across the selected period</p></section></div>
       <section className="workspace-card analytics-income"><h2>Recorded allocations</h2>{allocationTotal > 0 ? <><div className="analytics-stacked-bar" role="img" aria-label="Recorded allocations by envelope">{types.map(type => (allocations[type] ?? 0) > 0 && <span key={type} style={{ width: `${(allocations[type] ?? 0) / allocationTotal * 100}%`, backgroundColor: chartColor(type) }} title={`${envelopeMeta[type].name}: ${money.format(allocations[type] ?? 0)} MAD`} />)}</div><div className="analytics-allocation-list">{types.map(type => <div key={type}><span><i style={{ backgroundColor: chartColor(type) }} />{envelopeMeta[type].name}</span><strong>{money.format(allocations[type] ?? 0)}</strong><small>{((allocations[type] ?? 0) / allocationTotal * 100).toFixed(1)}%</small></div>)}<p className="workspace-note">Shares of recorded allocations.</p></div></> : <p className="analytics-inline-unavailable">No saved allocations in this period.</p>}</section></div>
     </div>

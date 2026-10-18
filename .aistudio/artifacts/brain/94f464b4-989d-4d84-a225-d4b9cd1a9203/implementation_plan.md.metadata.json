@@ -1,0 +1,6 @@
+{
+  "summary": "Comprehensive implementation plan to unlock all AutoWallet features end-to-end (Rules CRUD/reordering/pausing, Envelope transfers & spending, Profile/Password/2FA disable/API keys, Financial Health Score), add file-backed JSON persistence, refine desktop and mobile UX, and eliminate all warnings and errors while keeping the test suite passing.",
+  "updatedAt": "2026-10-18T10:45:15.501190734Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

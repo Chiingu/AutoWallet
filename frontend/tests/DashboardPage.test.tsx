@@ -82,7 +82,7 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('heading', { name: 'At a glance' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Back to Envelopes' }))
     expect(await screen.findByRole('heading', { name: 'Envelopes' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Move money Soon' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Move money' })).toBeEnabled()
   })
 
   it('shows a reconciled D3 Tax history and opens a payment', async () => {

@@ -1,6 +1,20 @@
 export const normalizeRecoveryCode = (value: string) => value.trim().toUpperCase()
 export const isRecoveryCode = (value: string) => /^[A-F0-9]{32}$/.test(normalizeRecoveryCode(value))
 
+const sessionRecoveryCodes = new Map<string, string[]>()
+
+export function getRecoveryCodes(email: string): string[] {
+  return sessionRecoveryCodes.get(email.trim().toLowerCase()) ?? []
+}
+
+export function setRecoveryCodes(email: string, codes: string[]) {
+  sessionRecoveryCodes.set(email.trim().toLowerCase(), [...codes])
+}
+
+export function clearRecoveryCodes() {
+  sessionRecoveryCodes.clear()
+}
+
 export function parseRecoveryCodes(payload: unknown): string[] {
   if (!payload || typeof payload !== 'object' || !('recovery_codes' in payload) ||
       !Array.isArray(payload.recovery_codes) || payload.recovery_codes.length === 0 ||

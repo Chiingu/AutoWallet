@@ -11,4 +11,8 @@ import '@testing-library/jest-dom/vitest'
 import { afterEach } from 'vitest'
 import * as RTL from '@testing-library/react'
 
+if (typeof window !== 'undefined') {
+  window.scrollTo = () => {}
+}
+
 afterEach(() => RTL.cleanup())
